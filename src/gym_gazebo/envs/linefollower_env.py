@@ -10,14 +10,18 @@ from rclpy.node import Node as RosNode
 from sensor_msgs.msg import Image as RosImage
 from geometry_msgs.msg import Twist as RosTwist
 
-NUM_OBS_STATES = 3
-NUM_ACTIONS = 3
+NUM_OBS_STATES = 3  # Line is 0: left, 1: center, 2: right
+NUM_ACTIONS = 3  # Drive 0: left, 1: forward, 2: right
+FORWARD_SPEED = 0.25
+TURN_SPEED = 0.8
+
 
 class LineFollowerEnv(GazeboEnv):
     def __init__(self):
         # Intializing ROS2
         rclpy.init(args=None)
-        
+
+
         super(LineFollowerEnv, self).__init__(launch_pkg='linefollow_ros',
                                     launch_file='my_agent.launch.xml',
                                     world_name='monza_gym')
@@ -41,7 +45,8 @@ class LineFollowerEnv(GazeboEnv):
         # Publishing and subscribing to ROS2 topics
         self.pub_cmd_vel_msg = self.ros_node.create_publisher(
             RosTwist, velocity_topic, 10)
-            
+
+
         self.sub_obs = self.ros_node.create_subscription(
             RosImage, observation_topic, self.callback_obs_feed_, 10)
 
@@ -79,7 +84,8 @@ class LineFollowerEnv(GazeboEnv):
 
         # Allow some time to settle
         time.sleep(0.1) # Wait 100 ms
-        
+
+
         self.is_resetting = False
 
         # Wait for next observation to come in before kickstarting the data loop
@@ -90,13 +96,13 @@ class LineFollowerEnv(GazeboEnv):
 
         # # Pause the sim after the first observation comes in
         self._pause_sim(True)
-        
+
         state, _ = self.process_obs(self.latest_obs)
 
         print("Done resetting")
         return state, {}
-    
-    
+
+
     def step(self, action: int):
         '''
         @brief takes a step in the simulation
@@ -124,58 +130,96 @@ class LineFollowerEnv(GazeboEnv):
         self._pause_sim(True)
 
         state, terminated = self.process_obs(self.latest_obs)
-        
+
         reward = self.process_reward(action, state, terminated)
 
         truncated = False # Used if we ran maximum number of steps.
         return state, reward, terminated, truncated, {}
 
-    
+
     ## HELPER FUNCTIONS
     def process_action(self, action: int):
         '''
         @brief Translate the action the robot is taking into a Twist message
-        @param action: an integer where 0 is left, 1 is forward and 2 is right 
+        @param action: an integer where 0 is left, 1 is forward and 2 is right
         @retval vel_cmd: Twist message equivalent of the action
         '''
-        vel_cmd = RosTwist()
+        vel_cmd = RosTwist()  # Create clean twist command
 
-        # TODO: Impelement process action.
-        
+        if action == 0:
+            # Line on the left, turn + / left / CCW
+            vel_cmd.linear.x = FORWARD_SPEED
+            vel_cmd.angular.z = TURN_SPEED
+        elif action == 1:
+            vel_cmd.linear.x = FORWARD_SPEED
+            vel_cmd.angular.z = 0.0
+        elif action == 2:
+            vel_cmd.linear.x = FORWARD_SPEED
+            vel_cmd.angular.z = -TURN_SPEED
+        else:
+            vel_cmd.linear.x = 0.0
+            vel_cmd.angular.z = 0.0  # TODO: is this the best default option?
+
         return vel_cmd
 
 
     def process_reward(self, action, state, terminated):
         '''
-        @brief depending on the action, state and terminated values assign
-               a reward
+        @brief depending on the action, state and terminated values assign a reward
         @retval reward: the reward for the current step
         '''
-        reward = 0
+        # Don't like off line
+        if terminated == True: 
+            reward = -100.0
 
-        # TODO: Implement process reward.
-        
+        # Forward good, turning ok  TODO: tinker w/ reward system
+        if action == 1: 
+            reward = 5.0
+        if action == 0 or action == 2:
+            reward = 4.0
+        else: 
+            reward = 0.0
+
         return reward
 
 
     def process_obs(self, obs: RosImage):
         '''
         @brief Identifies the line in the image and populates the state array
-               based on the line position (i.e. state=0 line is left, 
-               state=1 line is in the center)
+                based on the line position (i.e. state=0 line is left,
+                state=1 line is in the center)
         @param obs raw image from Gazebo sim
-        @retval state: the line position as a value: 
+        @retval state: the line position as a value:
             -1 (no line), 0 (left), 1 (center), 2 (right)
-        @retval terminated: the termination condition occured - the line is no 
+        @retval terminated: the termination condition occured - the line is no
                     longer in the field of the camera
         '''
-        cv_image = CvBridge().imgmsg_to_cv2(obs, desired_encoding='bgr8')
+        cv_image = CvBridge().imgmsg_to_cv2(obs, desired_encoding='bgr8')  # Turn msg to cv2 format
 
-        state = 0
-        terminated = False
+        # Slice region of interest
+        h, w, _ = cv_image.shape
+        roi_start = int(h * 0.85)  # Focus on bottom 15%
+        roi = cv_image[roi_start:h, :]
 
-        # TODO: Implement process observation
+        # Grayscale and threshold
+        gray_roi = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
+        _, mask = cv2.threshold(gray_roi, 100, 255, cv2.THRESH_BINARY_INV)
 
+        # Check if line is lost
+        M = cv2.moments(mask)
+        if M['m00'] == 0:
+            return -1, True  # Line out of frame, terminate
+
+        # Calc horizontal centroid and determine state
+        cx = int(M['m10']/M['m00'])
+        if cx < (w / 3.0):
+            state = 0
+        elif cx < (w * 2.0 / 3.0):
+            state = 1
+        else:
+            state = 2
+
+        terminated = False  # TODO: figure out where terminated leads to?
         return state, terminated
 
 
