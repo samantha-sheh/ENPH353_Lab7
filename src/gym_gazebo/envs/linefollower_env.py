@@ -169,16 +169,20 @@ class LineFollowerEnv(GazeboEnv):
         @retval reward: the reward for the current step
         '''
         # Don't like off line
-        if terminated == True: 
+        if terminated == True or state == -1: 
             reward = -100.0
 
-        # Forward good, turning ok  TODO: tinker w/ reward system
-        if action == 1: 
+        # Forward + on line good
+        if state == 1 and action == 1: 
             reward = 5.0
-        if action == 0 or action == 2:
-            reward = 4.0
+
+        # Turn + off line ok, otherwise not ok
+        elif state == 0 and action == 0: 
+            reward = 3.0
+        elif state == 2 and action == 2:
+            reward = 3.0
         else: 
-            reward = 0.0
+            reward = -1.0
 
         return reward
 

@@ -4,6 +4,8 @@ import gym_gazebo
 import gymnasium as gym  # RL library
 import numpy as np
 from torch.utils.tensorboard.writer import SummaryWriter  # Logging and visualizing data
+import os
+import pickle
 
 def main():
     writer = SummaryWriter()  # Log training process
@@ -54,7 +56,8 @@ def main():
             # Upd highest reward
             if total_reward > highest_reward:
                 highest_reward = total_reward
-                print("New highest reward: {total_reward}.")
+                print(f"New highest reward: {total_reward}.")
+                saveQ(q_table, "best_q_table")
 
             # Reset env and decay the exploration rate
             env.reset()
@@ -102,17 +105,47 @@ def choose_action(state, q_table, epsilon, action_space):
     return action
 
 
-def saveQ(q_table, save_path):
+def saveQ(q_table, filename):
+    """
+    Save Q-table to a path as a binary pickle file and a CSV file.
+    """
+    pkl_path = f"{filename}.pkl"
+    csv_path = f"{filename}.csv"
 
-    # TODO: Implement saving the Q values
+    with open(pkl_path, "wb") as f:
+        pickle.dump(q_table, f)
+
+    np.savetxt(csv_path, q_table, delimiter=",", fmt="%.4f")
+
+    print(f"Policy saved to {pkl_path} (and {csv_path})")
 
     return
 
-def loadQ(load_path):
+def loadQ(filename):
+    """
+    Loads the Q-table. Attempts to load the binary .pkl first,
+    falling back to .csv if pickle is unavailable.
+    """
+    pkl_path = f"{filename}.pkl"
+    csv_path = f"{filename}.csv"
 
-    # TODO: Implement loading the Q values
+    # Try loading binary pickle first
+    if os.path.exists(pkl_path):
+        with open(pkl_path, "rb") as f:
+            q_table = pickle.load(f)
+        print(f"Loaded policy from {pkl_path}")
+        return q_table
 
+    # Fallback to CSV
+    if os.path.exists(csv_path):
+        q_table = np.loadtxt(csv_path, delimiter=",")
+        print(f"Loaded policy from CSV fallback: {csv_path}")
+        return q_table
+
+    print("No saved policy found.")
+    
     return
+
 
 if __name__ == "__main__":
     main()
